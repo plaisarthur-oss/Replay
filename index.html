@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replay perche</title>
+<style>
+  body { margin:0; background:#000; color:#fff; font-family:sans-serif; text-align:center; }
+  canvas { width:100%; max-height:75vh; background:#111; }
+  .bar { padding:10px; }
+  input[type=range] { width:90%; }
+  button, select { font-size:18px; padding:8px 14px; margin:4px; }
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted style="display:none"></video>
+<canvas id="screen"></canvas>
+<div class="bar">
+  <button id="start">Démarrer la caméra</button>
+  <button id="live">Retour au direct</button>
+  <button id="pause">Pause</button>
+  <select id="speed">
+    <option value="1">Vitesse x1</option>
+    <option value="0.5">Ralenti x0.5</option>
+    <option value="0.25" selected>Ralenti x0.25</option>
+    <option value="0.1">Ralenti x0.1</option>
+  </select>
+  <div>Délai : <select id="delay">
+    <option value="5">5 s</option>
+    <option value="8" selected>8 s</option>
+    <option value="12">12 s</option>
+    <option value="20">20 s</option>
+  </select></div>
+  <input type="range" id="slider" min="0" max="1000" value="1000">
+  <div id="info"></div>
+</div>
+
+<script>
+const FPS = 30;                 // images par seconde mémorisées
+const MAX_SECONDS = 60;         // durée du tampon
+const W = 640, H = 360;         // résolution du tampon (garde la mémoire basse)
+
+const cam = document.getElementById('cam');
+const screen = document.getElementById('screen');
+const ctx = screen.getContext('2d');
+screen.width = W; screen.height = H;
+
+const frames = [];              // tampon circulaire d'images
+let playPos = null;             // position de lecture (null = suit le délai)
+let paused = false;
+let lastTick = performance.now();
+
+document.getElementById('start').onclick = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: 1280, height: 720, frameRate: 30 },
+    audio: false
+  });
+  cam.srcObject = stream;
+  await cam.play();
+  setInterval(capture, 1000 / FPS);
+  requestAnimationFrame(render);
+};
+
+function capture() {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  c.getContext('2d').drawImage(cam, 0, 0, W, H);
+  frames.push(c);
+  if (frames.length > MAX_SECONDS * FPS) frames.shift();
+}
+
+function render(now) {
+  const dt = (now - lastTick) / 1000;
+  lastTick = now;
+  const speed = parseFloat(document.getElementById('speed').value);
+  const delay = parseFloat(document.getElementById('delay').value) * FPS;
+
+  if (frames.length) {
+    if (playPos === null) {
+      playPos = Math.max(0, frames.length - 1 - delay);
+    } else if (!paused) {
+      playPos += dt * FPS * speed;
+      // le tampon glisse quand il est plein : on recale
+    }
+    playPos = Math.min(Math.max(0, playPos), frames.length - 1);
+    const f = frames[Math.floor(playPos)];
+    if (f) ctx.drawImage(f, 0, 0);
+
+    const slider = document.getElementById('slider');
+    if (document.activeElement !== slider) {
+      slider.value = Math.round((playPos / (frames.length - 1 || 1)) * 1000);
+    }
+    const back = ((frames.length - 1 - playPos) / FPS).toFixed(1);
+    document.getElementById('info').textContent = `Retard : ${back} s`;
+  }
+  requestAnimationFrame(render);
+}
+
+document.getElementById('slider').oninput = e => {
+  playPos = (e.target.value / 1000) * (frames.length - 1);
+};
+document.getElementById('live').onclick = () => { playPos = null; paused = false; };
+document.getElementById('pause').onclick = () => { paused = !paused; };
+</script>
+</body>
+</html>
